@@ -1,0 +1,171 @@
+#!/bin/bash
+set -eu
+
+param=${1-undef}
+
+# http://commons.apache.org/proper/commons-daemon/
+# path to jsvc must be absolute
+jsvc=${HOME}/bin/jsvc
+
+export JAVA_HOME="/opt/java/latest"
+
+app_home="${HOME}/git/jsvc-wrapper/target/scala-2.11"
+work_dir="${HOME}/git/jsvc-wrapper"
+
+app_name="myJsvcDemoApp"
+jar=$app_home/jsvc-demo-app.jar
+main_class=JsvcDemoDaemon
+
+std_out_file=${work_dir}/logs/std-out.log
+std_err_file=${work_dir}/logs/std-err.log
+
+pid_file="${work_dir}/logs/app.pid"
+logger_config_file="${work_dir}/logback.xml"
+
+# do not change below this line
+# #############################################################################
+run_jsvc() {
+  if [[ ! -x ${jsvc} ]]; then
+    error "jsvc executable not found at ${jsvc}"
+  fi
+  if [[ ! -f ${jar} ]]; then
+    error "jar not found at ${jar}"
+  fi
+  check_std_log ${std_out_file}
+  check_std_log ${std_err_file}
+
+  # -procname "${app_name}" is the grep key for ps lookup
+  ${jsvc} \
+    -procname "${app_name}" \
+    -cwd      "${work_dir}" \
+    -user     "${USER}" \
+    -pidfile  "${pid_file}" \
+    -outfile  "${std_out_file}" \
+    -errfile  "${std_err_file}" \
+    -Dlogback.configurationFile=${logger_config_file} \
+    -classpath "${jar}" \
+     $1 ${main_class}
+}
+
+error() {
+  echo "E: ${1}" >&2
+  exit 1
+}
+
+check_std_log() {
+  logfile=$1
+  if [[ -f ${logfile} ]]; then
+    if [[ ! -s ${logfile} ]]; then
+      rm ${logfile}
+    else
+      error "${logfile} must be empty, check your app or configuration"
+    fi
+  fi
+}
+
+run_jsvc_stop() {
+  if [[ -f ${pid_file} ]]; then
+    run_jsvc "-stop"
+  else
+    error "no pidfile found try kill manually"
+  fi
+}
+
+is_running() {
+  verbose=${1-0}
+  if [[ -f ${pid_file} ]]; then
+    if [[ ${verbose} = 1 ]]; then
+      echo "pidfile found"
+    fi
+    if do_ps_status $(cat ${pid_file}) ${verbose}; then
+      return 1
+    else
+      return 0
+    fi
+  else
+    if [[ ${verbose} = 1 ]]; then
+      echo "no pidfile found"
+    fi
+    if do_ps_status "" ${verbose}; then
+      return 1
+    else
+      return 0
+    fi
+    return 1
+  fi
+}
+
+do_ps_status() {
+  pid=$1
+  verbose=${2}
+  ps_lines=$(ps -ae -o pid,ppid,uname,args \
+    | egrep --color=yes "\-procnam[e] ${app_name}" || true)
+  pid_result=$(echo "$ps_lines" | egrep "^[ \t]*${pid}" || true)
+  if [[ -z $pid_result ]]; then
+    if [[ ${verbose} = 1 ]]; then
+      echo "no process is running"
+      if [[ -f ${pid_file} ]]; then
+        pid_content="$(cat ${pid_file})"
+        echo "pidfile content is: ${pid_content}"
+        rm -vf ${pid_file}
+      fi
+    fi
+    return 0
+  else
+    if [[ ${verbose} = 1 ]]; then
+      echo "is running"
+      echo -e "$pid_result"
+    fi
+    return 1
+  fi
+
+}
+
+do_start() {
+  if is_running; then
+    error "${app_name} is already started"
+  else
+    echo -n "starting ${app_name} ... "
+    run_jsvc ""
+    sleep 1
+    if is_running; then
+      echo "done"
+    else
+      echo ""
+      error "startup failed"
+    fi
+  fi
+}
+
+do_stop() {
+  if is_running; then
+    echo -n "stopping ${app_name} ... "
+    run_jsvc_stop
+    echo "done"
+  else
+    error "${app_name} is already stoped"
+  fi
+}
+
+case "$param" in
+  start)
+    do_start
+  ;;
+  stop)
+    do_stop
+  ;;
+  status)
+    is_running 1
+  ;;
+  restart)
+    echo "restarting ${app_name}:"
+    if is_running; then
+      do_stop
+    fi
+    do_start
+  ;;
+  *)
+    echo "usage: daemon {start|stop|restart|status}" >&2
+    exit 3
+  ;;
+esac

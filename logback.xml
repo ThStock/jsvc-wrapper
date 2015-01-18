@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="1 seconds" >
+
+  <appender name="DEFAULT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>logs/file.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>logs/%d{yyyy/MM}/file.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+      <maxHistory>30</maxHistory>
+    </rollingPolicy>
+    <!-- <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
+    http://logback.qos.ch/manual/filters.html
+    -->
+    <encoder>
+      <pattern>%date{yyyy-MM-dd'T'HH:mm:ss.SSSZ} %-5level %logger - [%marker] %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <root level="debug">
+    <appender-ref ref="DEFAULT" />
+  </root>
+</configuration>
