@@ -1,6 +1,5 @@
 import java.util.Timer
 import java.util.TimerTask
-import java.io.File
 
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.commons.daemon.Daemon
@@ -10,30 +9,11 @@ object JsvcDemo extends App {
   new JsvcDemoDaemon().start
 }
 
-class JsvcDemo extends RobustTimerTask {
-
-  val some = MarkerFactory.getMarker("some")
-
-  def work() {
-    logger.info(some, " hello ...")
-    val markerNames = Seq("re", "ex", "er", "th")
-    val existingMarkerFiles = markerNames.map(new File(_)).filter(_.exists)
-    if (existingMarkerFiles.nonEmpty) {
-      val markerFile = existingMarkerFiles.head
-      markerFile.delete
-      markerFile.getName match {
-        case "re" => throw new IllegalStateException("re")
-        case "ex" => throw new Exception("ex")
-        case "er" => throw new Error("er")
-        case _ => throw new Throwable("th")
-      }
-    }
-  }
-}
-
 class JsvcDemoDaemon extends Daemon with LazyLogging {
 
   val timer:Timer = new Timer()
+  val loggerTask = new JsvcDemo()
+  val shell = new JsvcSsh(5222, () => new ExceptionShell(loggerTask))
 
   def destroy() { logger.debug("destroy") }
 
@@ -48,14 +28,66 @@ class JsvcDemoDaemon extends Daemon with LazyLogging {
       def work() {
         logger.info(" running ...")
       }
-    }, 0, 1000)
-    timer.schedule(new JsvcDemo(), 0, 500)
+    }, 0, 3000)
+    timer.schedule(loggerTask, 0, 500)
+    shell.start()
   }
 
   def stop() {
-    logger.debug("stopping")
+    shell.stop()
     timer.cancel()
     logger.debug("stopped")
+  }
+}
+
+class JsvcDemo extends RobustTimerTask {
+
+  val some = MarkerFactory.getMarker("some")
+
+  var status:Seq[String] = Nil
+
+  def work() {
+    logger.info(some, " hello ...")
+    if (status.nonEmpty) {
+      val currentState = status.head
+      status = status.takeRight(status.size -1)
+      currentState match {
+        case "re" => throw new IllegalStateException("re")
+        case "ex" => throw new Exception("ex")
+        case "er" => throw new Error("er")
+        case _ => throw new Throwable("th")
+      }
+    }
+  }
+}
+
+class ExceptionShell(task:JsvcDemo) extends JsvcSsh.ShellAdapter {
+
+  val SHELL_CMD_QUIT = "quit"
+  val SHELL_CMD_EXIT = "exit"
+  val SHELL_CMD_HELP = "help"
+
+  def handleUserInput(line:String) {
+    exitOn(line, Seq(SHELL_CMD_QUIT, SHELL_CMD_EXIT))
+
+    if (line.equalsIgnoreCase(SHELL_CMD_HELP)) {
+      writeln("Possible values are: " + Seq("re", "ex", "er", "th"))
+    } else {
+      writeln("=> \"" + line + "\"")
+      task.status = line.split(" ").toSeq
+    }
+  }
+
+  def prompt() {
+    val params = Seq(SHELL_CMD_QUIT, SHELL_CMD_EXIT, SHELL_CMD_HELP)
+    initPrompt(prompt = "eX> ", completer = params)
+
+    writeln("""
+      |*******************************
+      |* Welcome to Exception Shell. *
+      |*******************************""".stripMargin.trim)
+
+    handle((line) => handleUserInput(line))
   }
 }
 

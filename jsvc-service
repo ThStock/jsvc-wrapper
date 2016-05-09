@@ -165,7 +165,7 @@ case "$param" in
     do_start
   ;;
   *)
-    echo "usage: daemon {start|stop|restart|status}" >&2
+    echo "usage: $0 {start|stop|restart|status}" >&2
     exit 3
   ;;
 esac
